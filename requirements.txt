@@ -1,0 +1,7 @@
+langchain
+langgraph
+langsmith
+numpy
+pandas
+matplotlib
+plotly
