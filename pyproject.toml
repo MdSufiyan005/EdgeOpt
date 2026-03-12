@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edgeopt"
+version = "0.1.0"
+description = "EdgeOpt project"
+dependencies = []  # Add your package deps here
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false

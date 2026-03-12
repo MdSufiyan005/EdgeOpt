@@ -1,4 +1,4 @@
-from quant_info import context
+from prompt.quant_info import context
 
 Planner_Prompt = """You are an expert ML systems engineer specializing in LLM quantization for edge deployment.
 
@@ -35,7 +35,7 @@ If previous attempts are provided, you MUST:
 """
 
 
-Execution_Prompt = """You are an expert MLOps engineer. You will use tools 
+Execution_Prompt = f"""You are an expert MLOps engineer. You will use tools 
 to quantize LLMs using llama.cpp and deploy them to edge devices (e.g., Raspberry Pi).
 
 ## Your Task
@@ -57,9 +57,7 @@ These correspond to different memory vs accuracy trade-offs.
 ```
 Planner output:
 
-{
- "quantization": "Q5_K_M"
-}
+`"quantization": "Q5_K_M"`
 
 Execution agent:
 Step 1
@@ -73,15 +71,15 @@ Upload the model on huggingface
 ```
 ## Output Contract
 Always end with a JSON block:
-{
+`
   "status": "success" | "failed",
   "quant_type": "<e.g. Q4_K_M>",
   "model_size_mb": <number>,
   "hf_repo_url": "<url or null>",
   "error": "<null or error message>"
-}
+`
 """
-Execution_Prompt = Execution_Prompt.format(context=context)
+# Execution_Prompt = Execution_Prompt.format(context=context)
 
 Summarizer_Prompt = """You are a performance analyst for edge AI systems.
 

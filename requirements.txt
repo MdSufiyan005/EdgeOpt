@@ -5,3 +5,5 @@ numpy
 pandas
 matplotlib
 plotly
+huggingface
+huggingface_hub

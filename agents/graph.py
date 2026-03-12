@@ -8,8 +8,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
 
-from prompts import Planner_Prompt, Execution_Prompt, Summarizer_Prompt
-from tools import convert_hf_to_gguf, quantize_gguf, upload_model_hf
+from prompt.prompts import Planner_Prompt, Execution_Prompt, Summarizer_Prompt
+from tools.execution import convert_hf_to_gguf, quantize_gguf, upload_model_hf
 
 load_dotenv()
 BRIDGE_URL = "http://localhost:8080"
