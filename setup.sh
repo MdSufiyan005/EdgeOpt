@@ -6,9 +6,7 @@ echo "── Setting up project ──"
 mkdir -p external
 mkdir -p models/hf models/gguf
 
-########################################
 # Clone llama.cpp if not present
-########################################
 
 if [ ! -d "external/llama.cpp" ]; then
     echo "── Cloning llama.cpp ──"
@@ -17,9 +15,7 @@ else
     echo "── llama.cpp already exists, skipping clone ──"
 fi
 
-########################################
 # Build llama.cpp using CMake
-########################################
 
 echo "── Building llama.cpp ──"
 
@@ -29,13 +25,11 @@ if [ ! -d "build" ]; then
     cmake -B build
 fi
 
-cmake --build build --config Release -j
+cmake --build build --config Release -j1
 
 cd ../..
 
-########################################
 # Install Python dependencies
-########################################
 
 echo "── Installing Python dependencies ──"
 
@@ -47,9 +41,7 @@ langchain-groq \
 huggingface_hub \
 python-dotenv
 
-########################################
 # Ensure model directories exist
-########################################
 
 mkdir -p models/hf
 mkdir -p models/gguf

@@ -6,56 +6,13 @@ from typing import Optional
 from huggingface_hub import HfApi, create_repo, upload_file
 from langchain.tools import tool
 
+from logging_ import adding_logs
+
 
 MODELS_HF_DIR   = Path(__file__).parent.parent / "models" / "hf"
 MODELS_GGUF_DIR = Path(__file__).parent.parent / "models" / "gguf"
 
-def detect_model_format(model_path: Path) -> str:
-    """
-    Returns: 'gguf' | 'hf_dir' | 'not_found'
-    """
-    if not model_path.exists():
-        return "not_found"
-    if model_path.is_file() and model_path.suffix == ".gguf":
-        return "gguf"
-    if model_path.is_dir() and (model_path / "config.json").exists():
-        return "hf_dir"
-    return "not_found"
-
-
-def resolve_model_input(model_input: str) -> dict:
-    """
-    Given a user-provided model string, find it in models/hf or models/gguf.
-    Accepts:
-      - bare name:  "llama-3.2-1b"
-      - filename:   "llama-3.2-1b-q4.gguf"
-      - HF repo:    "meta-llama/Llama-3.2-1B"  (maps to models/hf/<last-part>)
-
-    Returns dict with:
-      path   : Path object
-      format : 'gguf' | 'hf_dir' | 'not_found'
-      name   : clean stem for output naming
-    """
-    # Normalize: "meta-llama/Llama-3.2-1B" → "Llama-3.2-1B"
-    clean_name = model_input.split("/")[-1]
-
-    # Search order: gguf dir first, then hf dir
-    candidates = [
-        MODELS_GGUF_DIR / f"{clean_name}.gguf",
-        MODELS_GGUF_DIR / clean_name,          # maybe already has .gguf extension
-        MODELS_HF_DIR   / clean_name,          # HF model directory
-        Path(model_input),                      # absolute path fallback
-    ]
-
-    for candidate in candidates:
-        fmt = detect_model_format(candidate)
-        if fmt != "not_found":
-            return {"path": candidate, "format": fmt, "name": clean_name}
-
-    return {"path": Path(clean_name), "format": "not_found", "name": clean_name}
-
-
-
+logger = adding_logs("tools")
 
 # TOOL 1: Convert HuggingFace model → GGUF F16
 
@@ -72,23 +29,27 @@ def convert_hf_to_gguf(hf_model_path: str, output_path: str) -> dict:
     Returns:
         dict with keys: success (bool), output_model (str), stdout (str), stderr (str), error (str|None)
     """
+    logger.info(f"Starting conversion of HF model from {hf_model_path} to GGUF at {output_path}")
     
     model_dir = Path(hf_model_path)
     if not model_dir.exists():
+        logger.error(f"Model directory not found: {hf_model_path}")
         return {
             "success": False, "output_model": None,
             "stdout": "", "stderr": "",
             "error": f"Model path does not exist: {hf_model_path}"
         }
     if not (model_dir / "config.json").exists():
+        logger.error(f"No config.json found in {hf_model_path}. Is this a valid HF model dir?")
         return {
             "success": False, "output_model": None,
             "stdout": "", "stderr": "",
             "error": f"No config.json found in {hf_model_path}. Is this a valid HF model dir?"
         }
 
-    convert_script = Path("convert_hf_to_gguf.py")
+    convert_script = Path("external/llama.cpp/convert_hf_to_gguf_update.py")
     if not convert_script.exists():
+        logger.error("GGUF converter script not found: external/llama.cpp/convert_hf_to_gguf_update.py")
         return {
             "success": False, "output_model": None,
             "stdout": "", "stderr": "",
@@ -98,7 +59,7 @@ def convert_hf_to_gguf(hf_model_path: str, output_path: str) -> dict:
     
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
-
+    logger.info("Executing conversion command")
     cmd = [
         "python", str(convert_script),
         str(hf_model_path),
@@ -113,13 +74,18 @@ def convert_hf_to_gguf(hf_model_path: str, output_path: str) -> dict:
             text=True,
             timeout=600,           # 10 min cap — large models can be slow
         )
+        logger.info(f"Return code: {result.returncode}")
+        logger.debug(result.stdout)
+
     except subprocess.TimeoutExpired:
+        logger.error("Conversion timed out after 600 seconds")
         return {
             "success": False, "output_model": None,
             "stdout": "", "stderr": "",
             "error": "Conversion timed out after 600 seconds."
         }
     except FileNotFoundError:
+        logger.error("Python interpreter not found. Check your environment.")
         return {
             "success": False, "output_model": None,
             "stdout": "", "stderr": "",
@@ -127,11 +93,15 @@ def convert_hf_to_gguf(hf_model_path: str, output_path: str) -> dict:
         }
 
     if result.returncode == 0 and not output_file.exists():
+        logger.warning("Process exited 0 but output file was not created")
         return {
             "success": False, "output_model": None,
             "stdout": result.stdout, "stderr": result.stderr,
             "error": "Process exited 0 but output file was not created."
         }
+
+    if result.returncode == 0:
+        logger.info(f"Conversion completed successfully, output: {output_path}")
 
     return {
         "success": result.returncode == 0,
@@ -173,23 +143,26 @@ def quantize_gguf(input_model: str, output_model: str, quant_type: str) -> dict:
     
     input_file = Path(input_model)
     if not input_file.exists():
+        logger.error(f"Input model not found: {input_model}")
         return {
             "success": False, "output_model": None, "quant_type": quant_type,
             "model_size_mb": None, "stdout": "", "stderr": "",
             "error": f"Input model not found: {input_model}"
         }
     if input_file.suffix != ".gguf":
+        logger.error(f"Input must be a .gguf file, got: {input_file.suffix}")
         return {
             "success": False, "output_model": None, "quant_type": quant_type,
             "model_size_mb": None, "stdout": "", "stderr": "",
             "error": f"Input must be a .gguf file, got: {input_file.suffix}"
         }
 
-    quantize_bin = Path("./llama-quantize")
+    quantize_bin = Path("external/llama.cpp/build/bin/llama-quantize")
     if not quantize_bin.exists():
         # fallback: check PATH
         import shutil
         if not shutil.which("llama-quantize"):
+            logger.error("llama-quantize binary not found. Build llama.cpp first: `make llama-quantize`")
             return {
                 "success": False, "output_model": None, "quant_type": quant_type,
                 "model_size_mb": None, "stdout": "", "stderr": "",
@@ -201,6 +174,7 @@ def quantize_gguf(input_model: str, output_model: str, quant_type: str) -> dict:
     output_file = Path(output_model)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
+    logger.info("Executing quantization command")
     cmd = [str(quantize_bin), str(input_model), str(output_model), quant_type.upper()]
 
     try:
@@ -211,6 +185,7 @@ def quantize_gguf(input_model: str, output_model: str, quant_type: str) -> dict:
             timeout=900,           # 15 min cap
         )
     except subprocess.TimeoutExpired:
+        logger.error("Quantization timed out after 900 seconds")
         return {
             "success": False, "output_model": None, "quant_type": quant_type,
             "model_size_mb": None, "stdout": "", "stderr": "",
@@ -220,6 +195,7 @@ def quantize_gguf(input_model: str, output_model: str, quant_type: str) -> dict:
     model_size_mb = None
     if result.returncode == 0:
         if not output_file.exists():
+            logger.warning("Process exited 0 but output file was not created")
             return {
                 "success": False, "output_model": None, "quant_type": quant_type,
                 "model_size_mb": None,
@@ -227,6 +203,7 @@ def quantize_gguf(input_model: str, output_model: str, quant_type: str) -> dict:
                 "error": "Process exited 0 but output file was not created."
             }
         model_size_mb = round(output_file.stat().st_size / (1024 ** 2), 2)
+        logger.info(f"Quantization completed successfully, output: {output_model}, size: {model_size_mb} MB")
 
     return {
         "success": result.returncode == 0,
@@ -262,8 +239,11 @@ def upload_model_hf(
     Returns:
         dict with keys: success (bool), hf_repo_url (str|None), filename (str), error (str|None)
     """
+    logger.info(f"Starting upload of {model_path} to HF repo {repo_id}")
+    
     token = hf_token or os.environ.get("HF_TOKEN")
     if not token:
+        logger.error("No HuggingFace token found. Set HF_TOKEN env var or pass hf_token.")
         return {
             "success": False, "hf_repo_url": None, "filename": None,
             "error": "No HuggingFace token found. Set HF_TOKEN env var or pass hf_token."
@@ -271,17 +251,20 @@ def upload_model_hf(
 
     local_file = Path(model_path)
     if not local_file.exists():
+        logger.error(f"Model file not found: {model_path}")
         return {
             "success": False, "hf_repo_url": None, "filename": None,
             "error": f"Model file not found: {model_path}"
         }
     if local_file.suffix != ".gguf":
+        logger.error(f"Expected a .gguf file, got: {local_file.suffix}")
         return {
             "success": False, "hf_repo_url": None, "filename": None,
             "error": f"Expected a .gguf file, got: {local_file.suffix}"
         }
 
     if "/" not in repo_id or len(repo_id.split("/")) != 2:
+        logger.error(f"repo_id must be 'username/repo-name', got: '{repo_id}'")
         return {
             "success": False, "hf_repo_url": None, "filename": None,
             "error": f"repo_id must be 'username/repo-name', got: '{repo_id}'"
@@ -289,6 +272,7 @@ def upload_model_hf(
 
     api = HfApi(token=token)
 
+    logger.info(f"Creating/accessing HF repo: {repo_id}")
     try:
         create_repo(
             repo_id=repo_id,
@@ -297,6 +281,7 @@ def upload_model_hf(
             token=token,
         )
     except Exception as e:
+        logger.error(f"Failed to create/access repo '{repo_id}': {e}")
         return {
             "success": False, "hf_repo_url": None, "filename": None,
             "error": f"Failed to create/access repo '{repo_id}': {e}"
@@ -306,6 +291,7 @@ def upload_model_hf(
     # Use a descriptive filename in the repo: <original_stem>-<quant>.gguf
     remote_filename = f"{local_file.stem}-{quant_type.upper()}.gguf"
 
+    logger.info(f"Uploading file to HF as: {remote_filename}")
     try:
         api.upload_file(
             path_or_fileobj=str(local_file),
@@ -315,15 +301,42 @@ def upload_model_hf(
             commit_message=f"Add {quant_type.upper()} quantized GGUF via agentic pipeline",
         )
     except Exception as e:
+        logger.error(f"Upload failed: {e}")
         return {
             "success": False, "hf_repo_url": None, "filename": remote_filename,
             "error": f"Upload failed: {e}"
         }
 
     repo_url = f"https://huggingface.co/{repo_id}"
+    logger.info(f"Upload successful to {repo_url}")
     return {
         "success": True,
         "hf_repo_url": repo_url,
         "filename": remote_filename,
         "error": None,
     }
+
+@tool
+def download_hf_model(repo_id: str, local_dir: str) -> dict:
+    """
+    Downloads a HuggingFace model to a local directory using snapshot_download.
+
+    Args:
+        repo_id: HuggingFace repo ID e.g. 'Qwen/Qwen3-0.6B'
+        local_dir: Local path to save the model
+
+    Returns:
+        dict with keys: success (bool), model_path (str), error (str|None)
+    """
+    logger.info(f"Starting download of HF model {repo_id} to {local_dir}")
+    
+    from huggingface_hub import snapshot_download
+    try:
+        path = snapshot_download(repo_id=repo_id, local_dir=local_dir)
+        logger.info(f"Download completed successfully to {path}")
+        return {"success": True, "model_path": path, "error": None}
+        
+        
+    except Exception as e:
+        logger.error(f"Download failed: {str(e)}")
+        return {"success": False, "model_path": None, "error": str(e)}

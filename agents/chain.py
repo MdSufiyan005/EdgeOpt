@@ -1,38 +1,21 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+# chain.py
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
-from dotenv import load_dotenv
-from prompt.planner.py import Planner_Prompt,Execution_Prompt,Summarizer_Prompt
+from langchain_core.output_parsers import StrOutputParser
 
-load_dotenv()
+from prompt.agent_prompts import Planner_Prompt, Execution_Prompt, Summarizer_Prompt
 
-planner_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        Planner_Prompt
-    ),
-    MessagesPlaceholder(variable_name="messages"),
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.1)
+
+planner_prompt = ChatPromptTemplate.from_messages([("system", Planner_Prompt), ("human", "{messages}")])
+planner_chain = planner_prompt | llm | StrOutputParser()
+
+execution_prompt = ChatPromptTemplate.from_messages([("system", Execution_Prompt), ("human", "{messages}")])
+execution_chain = execution_prompt | llm.bind_tools([
+    "download_hf_model", "convert_hf_to_gguf", "quantize_gguf", "upload_model_hf"
 ])
 
-execution_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        Execution_Prompt
-    ),
-    MessagesPlaceholder(variable_name="messages"),
-])
+summarizer_prompt = ChatPromptTemplate.from_messages([("system", Summarizer_Prompt), ("human", "{messages}")])
+summarizer_chain = summarizer_prompt | llm | StrOutputParser()
 
-summarizer_prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        Summarizer_Prompt
-    ),
-    MessagesPlaceholder(variable_name="messages"),
-])
-
-## Chains
-
-llm = ChatGroq(model_name="llama-3.1-8b-instant") 
-
-planner_chain     = planner_prompt     | llm
-execution_chain   = execution_prompt   | llm
-summarizer_chain  = summarizer_prompt  | llm
+print("✅ All chains loaded")
